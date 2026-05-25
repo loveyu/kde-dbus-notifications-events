@@ -14,6 +14,8 @@ import (
 	"github.com/loveyu/kde-dbus-notifications-events/monitor"
 )
 
+var version = "dev"
+
 const (
 	maxUptime      = 12 * time.Hour
 	relistenPeriod = 1 * time.Hour
@@ -26,7 +28,14 @@ func main() {
 		"状态文件目录（默认 /run/user/$UID/kde-notify-status）")
 	flag.StringVar(&cfg.LogLevel, "log-level", "info", "日志级别: debug/info/warn/error（默认 info）")
 	flag.BoolVar(&cfg.Once, "once", false, "捕获一次信号后退出（用于测试）")
+
+	showVersion := flag.Bool("version", false, "显示版本号并退出")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	logger := config.NewLogger(cfg.LogLevel)
 

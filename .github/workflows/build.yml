@@ -41,7 +41,8 @@ jobs:
           GOARM: ${{ matrix.goarm }}
           CGO_ENABLED: "0"
         run: |
-          go build -ldflags="-s -w" \
+          VERSION="${GITHUB_REF_NAME#v}"
+          go build -ldflags="-s -w -X main.version=$VERSION" \
             -o kde-notify-status-monitor-linux-${{ matrix.suffix }} .
 
       - uses: actions/upload-artifact@v4

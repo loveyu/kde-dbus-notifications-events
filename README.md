@@ -59,6 +59,7 @@ kde-notify-status-monitor [选项]
   --status-dir <path>   状态文件目录（默认 /run/user/$UID/kde-notify-status）
   --log-level <level>   日志级别: debug/info/warn/error（默认 info）
   --once                捕获一次信号后退出（测试用）
+  --version             显示版本号并退出
 ```
 
 ## 架构

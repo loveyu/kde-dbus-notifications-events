@@ -7,7 +7,7 @@
 go build -o kde-notify-status-monitor .
 
 # 交叉编译（所有 CI 目标均使用 CGO_ENABLED=0）
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o kde-notify-status-monitor-linux-arm64 .
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w -X main.version=$(git describe --tags --always)" -o kde-notify-status-monitor-linux-arm64 .
 
 # 本地测试（需要 KDE 桌面会话 + notify-send）
 bash test.sh [close|click|all]
