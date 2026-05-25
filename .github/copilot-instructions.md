@@ -1,67 +1,67 @@
-# Copilot Instructions
+# Copilot 指令
 
-## Build & Run
+## 构建与运行
 
 ```bash
-# Build
+# 构建
 go build -o kde-notify-status-monitor .
 
-# Cross-compile (all CI targets use CGO_ENABLED=0)
+# 交叉编译（所有 CI 目标均使用 CGO_ENABLED=0）
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o kde-notify-status-monitor-linux-arm64 .
 
-# Test locally (requires KDE session + notify-send)
+# 本地测试（需要 KDE 桌面会话 + notify-send）
 bash test.sh [close|click|all]
 
-# Run in test/single-shot mode
+# 以测试/单次捕获模式运行
 ./kde-notify-status-monitor --once --status-dir /tmp/test-notify --log-level debug
 ```
 
-There are no unit tests; the only test harness is `test.sh`.
+没有单元测试，唯一的测试脚本是 `test.sh`。
 
-## Architecture
+## 架构
 
-The program has three concurrent goroutines in normal operation:
+程序正常运行时包含三个并发 goroutine：
 
-1. **Signal listener** (`monitor.listenSignals`) — subscribes to `ActionInvoked` and `NotificationClosed` D-Bus signals on the session bus. Runs in 1-hour cycles, restarted by `monitor.Run`.
-2. **Notify monitor** (`monitor.runNotifyMonitor`) — a **separate** D-Bus connection that calls `BecomeMonitor` to eavesdrop on `Notify` method calls. This connection becomes read-only after `BecomeMonitor`. It correlates method calls with their replies via a `pending map[uint32]callInfo` keyed by D-Bus serial, then emits `created` events.
-3. **Main goroutine** (`main.go`) — owns the 12-hour process lifetime timer and listens for `SIGTERM`/`SIGINT`.
+1. **信号监听器**（`monitor.listenSignals`）— 订阅会话总线上的 `ActionInvoked` 和 `NotificationClosed` D-Bus 信号。以 1 小时为周期运行，由 `monitor.Run` 负责重���。
+2. **通知监视器**（`monitor.runNotifyMonitor`）— 使用一个**独立的** D-Bus 连接，调用 `BecomeMonitor` 窃听 `Notify` 方法调用。该连接在 `BecomeMonitor` 之后变为只读。它通过 `pending map[uint32]callInfo`（以 D-Bus 序列号为键）将方法调用与其回复进行关联，然后发出 `created` 事件。
+3. **主 goroutine**（`main.go`）— 拥有 12 小时进程生命周期计时器，并监听 `SIGTERM`/`SIGINT` 信号。
 
-### Why two D-Bus connections?
+### 为什么需要两个 D-Bus 连接？
 
-`BecomeMonitor` turns the connection into a read-only monitor — it can no longer call methods or subscribe to signals. The signal listener needs a normal read-write connection. Hence `runNotifyMonitor` always opens its own `dbus.ConnectSessionBus()`.
+`BecomeMonitor` 会将连接变为只读监视器——此后它不能再调用方法或订阅信号。信号监听器需要一个普通的读写连接。因此 `runNotifyMonitor` 始终打开自己的 `dbus.ConnectSessionBus()`。
 
-### Event correlation (created events)
+### 事件关联（created 事件）
 
-`Notify` method calls arrive **before** the notification server assigns an ID. The ID arrives in the method reply. `processMonitorMessage` stores `callInfo` in `pending[serial]` on `TypeMethodCall`, then on `TypeMethodReply` matches by `replySerial` and the original sender to reconstruct the full event.
+`Notify` 方法调用在通知服务器分配 ID **之前**到达。ID 在方法回复中返回。`processMonitorMessage` 在 `TypeMethodCall` 时将 `callInfo` 存入 `pending[serial]`，然后在 `TypeMethodReply` 时通过 `replySerial` 和原始发送者进行匹配，重构完整事件。
 
-### Output files
+### 输出文件
 
-Each event type overwrites a single fixed file (last-event semantics, not a log):
+每种事件类型覆写一个固定的文件（仅保留最新事件，非日志追加）：
 
-| Event | File |
+| 事件 | 文件 |
 |---|---|
-| Notification created | `$STATUS_DIR/kde-dbus-notify-created.json` |
-| Action button clicked | `$STATUS_DIR/kde-dbus-notify-clicked.json` |
-| Notification closed | `$STATUS_DIR/kde-dbus-notify-closed.json` |
+| 通知创建 | `$STATUS_DIR/kde-dbus-notify-created.json` |
+| 操作按钮点击 | `$STATUS_DIR/kde-dbus-notify-clicked.json` |
+| 通知关闭 | `$STATUS_DIR/kde-dbus-notify-closed.json` |
 
-Default `$STATUS_DIR` is `/run/user/$UID`. Files are written atomically (temp file + `os.Rename`).
+默认 `$STATUS_DIR` 为 `/run/user/$UID/kde-notify-status`，程序启动时自动创建。文件使用原子写入（临时文件 + `os.Rename`）。
 
-### D-Bus signal semantics
+### D-Bus 信号语义
 
-- **ActionInvoked** only fires for explicit **action buttons** defined in the `Notify` call. Clicking the notification body fires `NotificationClosed(reason=2)` instead.
-- **NotificationClosed reason codes**: `1`=expired, `2`=dismissed (user), `3`=closed (app called `CloseNotification`), `4`=undefined.
+- **ActionInvoked** 仅在 `Notify` 调用中定义了明确的**操作按钮**时触发。点击通知正文会触发 `NotificationClosed(reason=2)`。
+- **NotificationClosed reason 代码**：`1`=超时过期，`2`=用户关闭，`3`=应用调用 `CloseNotification` 关闭，`4`=未定义。
 
-## Key Conventions
+## 关键约定
 
-- **No Co-authored-by trailers** in git commits.
-- **All log output goes to stderr** via `config.Logger` (RFC3339 timestamps, `[DEBUG/INFO/WARN/ERROR]` prefix). Never use `log` or `fmt.Print` directly.
-- **Atomic writes only**: always `os.CreateTemp` → write → `os.Rename`. Never write state files directly.
-- **Single instance** via `syscall.Flock` on `/run/user/$UID/kde-notify-status-monitor.lock`.
-- **Non-KDE guard**: check `XDG_CURRENT_DESKTOP` contains `"KDE"` (case-insensitive) and `DBUS_SESSION_BUS_ADDRESS` is set; if not, sleep 30s then `os.Exit(0)` (allows systemd `Restart=on-failure` without thrash).
-- **`--once` flag** is for testing: `listenSignals` returns `nil` after the first dispatched event; `Run()` checks `cfg.Once && err == nil` and exits cleanly instead of reconnecting.
-- **`toStringSlice`** is required when reading D-Bus `as` (array of strings) values from raw messages — godbus may return `[]string` or `[]interface{}` depending on context.
-- CGO is disabled in all builds (`CGO_ENABLED=0`).
+- Git 提交中**不使用 Co-authored-by 尾注**。
+- **所有日志输出到 stderr**，通过 `config.Logger`（RFC3339 时间戳，`[DEBUG/INFO/WARN/ERROR]` 前缀）。禁止直接使用 `log` 或 `fmt.Print`。
+- **仅使用原子写入**：始终 `os.CreateTemp` → 写入 → `os.Rename`。禁止直接写入状态文件。
+- **单实例**通过 `/run/user/$UID/kde-notify-status-monitor.lock` 上的 `syscall.Flock` 实现。
+- **非 KDE 环境守卫**：检查 `XDG_CURRENT_DESKTOP` 是否包含 `"KDE"`（不区分大小写）且 `DBUS_SESSION_BUS_ADDRESS` 已设置；若不满足则休眠 30 秒后 `os.Exit(0)`（允许 systemd `Restart=on-failure` 而不会反复重启）。
+- **`--once` 标志**用于测试：`listenSignals` 在首次分发事件后返回 `nil`；`Run()` 检查 `cfg.Once && err == nil` 后干净退出而非重连。
+- **`toStringSlice`** 在从原始消息中读取 D-Bus `as`（字符串数组）值时必须使用——godbus 根据上下文可能返回 `[]string` 或 `[]interface{}`。
+- 所有构建均禁用 CGO（`CGO_ENABLED=0`）。
 
-## Release
+## 发布
 
-Push a `v*` tag. GitHub Actions builds all six Linux architectures and publishes a release automatically via `softprops/action-gh-release`.
+推送 `v*` 标签。GitHub Actions 自动构建全部六种 Linux 架构，并通过 `softprops/action-gh-release` 自动发布 Release。
