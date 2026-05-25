@@ -1,0 +1,14 @@
+[Unit]
+Description=KDE Notification Status Monitor
+Documentation=https://github.com/loveyu/kde-dbus-notifications-events
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/kde-notify-status-monitor --status-dir /run --log-level info
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
