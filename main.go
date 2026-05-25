@@ -86,10 +86,11 @@ func main() {
 	}
 
 	// Normal mode: 1-hour D-Bus re-listen cycles.
-	var maxTimer *time.Timer
+	var maxTimerChan <-chan time.Time
 	if cfg.MaxHours > 0 {
-		maxTimer = time.NewTimer(time.Duration(cfg.MaxHours * float64(time.Hour)))
-		defer maxTimer.Stop()
+		t := time.NewTimer(time.Duration(cfg.MaxHours * float64(time.Hour)))
+		defer t.Stop()
+		maxTimerChan = t.C
 	}
 
 	go func() {
@@ -108,11 +109,16 @@ func main() {
 		}
 	}()
 
-	select {
-	case sig := <-osSig:
+	if maxTimerChan != nil {
+		select {
+		case sig := <-osSig:
+			logger.Info(fmt.Sprintf("收到信号 %v，优雅退出", sig))
+		case <-maxTimerChan:
+			logger.Info(fmt.Sprintf("已运行%.1f小时，退出等待systemd重启", cfg.MaxHours))
+		}
+	} else {
+		sig := <-osSig
 		logger.Info(fmt.Sprintf("收到信号 %v，优雅退出", sig))
-	case <-maxTimer.C:
-		logger.Info(fmt.Sprintf("已运行%.1f小时，退出等待systemd重启", cfg.MaxHours))
 	}
 	rootCancel()
 }
