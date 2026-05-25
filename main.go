@@ -16,10 +16,7 @@ import (
 
 var version = "dev"
 
-const (
-	maxUptime      = 12 * time.Hour
-	relistenPeriod = 1 * time.Hour
-)
+const relistenPeriod = 1 * time.Hour
 
 func main() {
 	cfg := &config.Config{}
@@ -28,6 +25,7 @@ func main() {
 		"状态文件目录（默认 /run/user/$UID/kde-notify-status）")
 	flag.StringVar(&cfg.LogLevel, "log-level", "info", "日志级别: debug/info/warn/error（默认 info）")
 	flag.BoolVar(&cfg.Once, "once", false, "捕获一次信号后退出（用于测试）")
+	flag.Float64Var(&cfg.MaxHours, "max-hours", 0, "最大运行小时数，超时后自动退出（0=不限制）")
 
 	showVersion := flag.Bool("version", false, "显示版本号并退出")
 	flag.Parse()
@@ -60,10 +58,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.Info(fmt.Sprintf("程序启动 PID=%d 状态目录=%s 日志级别=%s",
-		os.Getpid(), cfg.StatusDir, cfg.LogLevel))
+	logger.Info(fmt.Sprintf("程序启动 PID=%d 状态目录=%s 日志级别=%s 最大运行=%s",
+		os.Getpid(), cfg.StatusDir, cfg.LogLevel, maxHoursDisplay(cfg.MaxHours)))
 
-	// Root context: cancelled on SIGTERM/SIGINT or 12-hour uptime limit.
+	// Root context: cancelled on SIGTERM/SIGINT or max-hours timeout.
 	rootCtx, rootCancel := context.WithCancel(context.Background())
 	defer rootCancel()
 
@@ -87,9 +85,12 @@ func main() {
 		return
 	}
 
-	// Normal mode: 12-hour process lifetime, 1-hour D-Bus re-listen cycles.
-	restartTimer := time.NewTimer(maxUptime)
-	defer restartTimer.Stop()
+	// Normal mode: 1-hour D-Bus re-listen cycles.
+	var maxTimer *time.Timer
+	if cfg.MaxHours > 0 {
+		maxTimer = time.NewTimer(time.Duration(cfg.MaxHours * float64(time.Hour)))
+		defer maxTimer.Stop()
+	}
 
 	go func() {
 		for {
@@ -110,14 +111,21 @@ func main() {
 	select {
 	case sig := <-osSig:
 		logger.Info(fmt.Sprintf("收到信号 %v，优雅退出", sig))
-	case <-restartTimer.C:
-		logger.Info("已运行12小时，退出等待systemd重启")
+	case <-maxTimer.C:
+		logger.Info(fmt.Sprintf("已运行%.1f小时，退出等待systemd重启", cfg.MaxHours))
 	}
 	rootCancel()
 }
 
 // isKDEEnvironment returns true when XDG_CURRENT_DESKTOP contains "KDE"
 // and DBUS_SESSION_BUS_ADDRESS is set.
+func maxHoursDisplay(h float64) string {
+	if h <= 0 {
+		return "不限制"
+	}
+	return fmt.Sprintf("%.1fh", h)
+}
+
 func isKDEEnvironment() bool {
 	desktop := os.Getenv("XDG_CURRENT_DESKTOP")
 	dbusAddr := os.Getenv("DBUS_SESSION_BUS_ADDRESS")

@@ -11,6 +11,7 @@ type Config struct {
 	StatusDir string
 	LogLevel  string
 	Once      bool
+	MaxHours  float64
 }
 
 // Logger writes structured log lines to stderr.

@@ -24,7 +24,7 @@ bash test.sh [close|click|all]
 
 1. **信号监听器**（`monitor.listenSignals`）— 订阅会话总线上的 `ActionInvoked` 和 `NotificationClosed` D-Bus 信号。以 1 小时为周期运行，由 `monitor.Run` 负责重���。
 2. **通知监视器**（`monitor.runNotifyMonitor`）— 使用一个**独立的** D-Bus 连接，调用 `BecomeMonitor` 窃听 `Notify` 方法调用。该连接在 `BecomeMonitor` 之后变为只读。它通过 `pending map[uint32]callInfo`（以 D-Bus 序列号为键）将方法调用与其回复进行关联，然后发出 `created` 事件。
-3. **主 goroutine**（`main.go`）— 拥有 12 小时进程生命周期计时器，并监听 `SIGTERM`/`SIGINT` 信号。
+3. **主 goroutine**（`main.go`）— 监听 `SIGTERM`/`SIGINT` 信号；通过 `--max-hours` 设置时拥有进程生命周期计时器。
 
 ### 为什么需要两个 D-Bus 连接？
 

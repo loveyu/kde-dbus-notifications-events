@@ -11,7 +11,7 @@ KDE 桌面通知事件监控守护程序。通过 `godbus/dbus` 原生订阅 D-B
 - 单实例锁（flock），防止重复运行
 - D-Bus 断连后指数退避自动重连（1s → 2s → … → 30s）
 - 每 1 小时重建一次 D-Bus 连接
-- 运行 12 小时后自动退出（由 systemd 重启）
+- 可选 `--max-hours` 设置最大运行时长，超时后自动退出（由 systemd 重启）
 - 状态文件使用原子写入（临时文件 + rename）
 
 ## 状态文件格式
@@ -56,10 +56,11 @@ KDE 桌面通知事件监控守护程序。通过 `godbus/dbus` 原生订阅 D-B
 ```
 kde-notify-status-monitor [选项]
 
-  --status-dir <path>   状态文件目录（默认 /run/user/$UID/kde-notify-status）
-  --log-level <level>   日志级别: debug/info/warn/error（默认 info）
-  --once                捕获一次信号后退出（测试用）
-  --version             显示版本号并退出
+  --status-dir <path>    状态文件目录（默认 /run/user/$UID/kde-notify-status）
+  --log-level <level>    日志级别: debug/info/warn/error（默认 info）
+  --once                 捕获一次信号后退出（测试用）
+  --max-hours <hours>    最大运行小时数，超时后自动退出（默认 0=不限制）
+  --version              显示版本号并退出
 ```
 
 ## 架构
