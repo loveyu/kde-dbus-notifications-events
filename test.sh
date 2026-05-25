@@ -5,7 +5,7 @@
 set -euo pipefail
 
 BINARY="./kde-notify-status-monitor"
-STATUS_DIR="/tmp/kde-notify-test"
+STATUS_DIR="/tmp/kde-notify-test"         # 测试用临时目录；生产默认为 /run/user/$UID
 CREATED_FILE="$STATUS_DIR/kde-dbus-notify-created.json"
 CLICKED_FILE="$STATUS_DIR/kde-dbus-notify-clicked.json"
 CLOSED_FILE="$STATUS_DIR/kde-dbus-notify-closed.json"

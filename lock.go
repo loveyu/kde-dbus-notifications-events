@@ -17,7 +17,7 @@ type Lock struct {
 // acquireLock creates/opens a lock file and acquires an exclusive non-blocking
 // flock. Returns an error if another instance is already running.
 func acquireLock(logger *config.Logger) (*Lock, error) {
-	path := "/tmp/kde-notify-status-monitor.lock"
+	path := fmt.Sprintf("/run/user/%d/kde-notify-status-monitor.lock", os.Getuid())
 	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_RDWR, 0644)
 	if err != nil {
 		return nil, fmt.Errorf("打开锁文件失败 %s: %w", path, err)

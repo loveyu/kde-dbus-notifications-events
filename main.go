@@ -21,7 +21,9 @@ const (
 
 func main() {
 	cfg := &config.Config{}
-	flag.StringVar(&cfg.StatusDir, "status-dir", "/run", "状态文件目录（默认 /run）")
+	flag.StringVar(&cfg.StatusDir, "status-dir",
+		fmt.Sprintf("/run/user/%d", os.Getuid()),
+		"状态文件目录（默认 /run/user/$UID）")
 	flag.StringVar(&cfg.LogLevel, "log-level", "info", "日志级别: debug/info/warn/error（默认 info）")
 	flag.BoolVar(&cfg.Once, "once", false, "捕获一次信号后退出（用于测试）")
 	flag.Parse()
