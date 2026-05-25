@@ -49,6 +49,11 @@ func Run(ctx context.Context, cfg *config.Config, logger *config.Logger) error {
 			return ctx.Err()
 		}
 
+		// --once: listenSignals returns nil after first event; exit cleanly.
+		if cfg.Once && err == nil {
+			return nil
+		}
+
 		logger.Warn(fmt.Sprintf("D-Bus监听中断: %v，%v后重连", err, backoff))
 		select {
 		case <-ctx.Done():

@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # test.sh — 本地测试 kde-notify-status-monitor
-# 用法: bash test.sh
+# 用法: bash test.sh [click|close|all]
+#   click  — 仅测试点击事件（ActionInvoked，需点击通知的 action 按钮）
+#   close  — 仅测试关闭事件（NotificationClosed）
+#   all    — 依次测试点击和关闭（默认）
 
 set -euo pipefail
 
+MODE="${1:-all}"
 BINARY="./kde-notify-status-monitor"
 STATUS_DIR="/tmp/kde-notify-test"         # 测试用临时目录；生产默认为 /run/user/$UID
 CREATED_FILE="$STATUS_DIR/kde-dbus-notify-created.json"
@@ -17,8 +21,9 @@ success() { echo -e "${GREEN}[OK]${NC}   $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error()   { echo -e "${RED}[ERR]${NC}  $*"; }
 
+MONITOR_PID=""
 cleanup() {
-    if [[ -n "${MONITOR_PID:-}" ]] && kill -0 "$MONITOR_PID" 2>/dev/null; then
+    if [[ -n "$MONITOR_PID" ]] && kill -0 "$MONITOR_PID" 2>/dev/null; then
         info "停止监听进程 PID=$MONITOR_PID"
         kill "$MONITOR_PID" 2>/dev/null || true
         wait "$MONITOR_PID" 2>/dev/null || true
@@ -29,11 +34,11 @@ trap cleanup EXIT
 # ── 前置检查 ─────────────────────────────────────────────────────────────────
 echo ""
 info "═══════════════════════════════════════════════"
-info " kde-notify-status-monitor 本地测试"
+info " kde-notify-status-monitor 本地测试 [模式: $MODE]"
 info "═══════════════════════════════════════════════"
 echo ""
 
-# 编译（如果二进制不存在或源码更新）
+# 编译（源码比二进制新时重新编译）
 if [[ ! -f "$BINARY" ]] || [[ main.go -nt "$BINARY" ]] || \
    [[ monitor/dbus.go -nt "$BINARY" ]] || [[ monitor/handler.go -nt "$BINARY" ]]; then
     info "编译二进制..."
@@ -43,105 +48,165 @@ else
 fi
 
 if ! command -v notify-send &>/dev/null; then
-    error "未找到 notify-send，请安装 libnotify-bin 或 libnotify"
+    error "未找到 notify-send，请安装 libnotify-bin"
     exit 1
+fi
+
+# 检查 notify-send 是否支持 --action（libnotify >= 0.8）
+NOTIFY_HAS_ACTION=false
+if notify-send --help 2>&1 | grep -q -- '--action'; then
+    NOTIFY_HAS_ACTION=true
 fi
 
 # 检查 KDE 环境
 if [[ "${XDG_CURRENT_DESKTOP:-}" != *KDE* ]]; then
     warn "XDG_CURRENT_DESKTOP=${XDG_CURRENT_DESKTOP:-<未设置>}"
-    warn "非 KDE 环境，程序会等30秒后退出。"
-    warn "如需强制测试，按 Ctrl+C 跳过，或手动设置:"
-    warn "  export XDG_CURRENT_DESKTOP=KDE"
-    warn "  export DBUS_SESSION_BUS_ADDRESS=\$DBUS_SESSION_BUS_ADDRESS"
+    warn "非 KDE 环境下程序会等30秒后退出。"
 fi
 
 mkdir -p "$STATUS_DIR"
-rm -f "$CREATED_FILE" "$CLICKED_FILE" "$CLOSED_FILE"
 
-# ── 启动监听（--once：收到第一个信号后退出，方便测试）───────────────────────
-info "启动监听进程（--once 模式，日志级别=debug）..."
-"$BINARY" \
-    --status-dir "$STATUS_DIR" \
-    --log-level debug \
-    --once \
-    &
-MONITOR_PID=$!
-success "监听进程 PID=$MONITOR_PID"
-
-# 等待进程就绪（给 D-Bus 订阅一点时间）
-sleep 1
-if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-    error "监听进程已退出（非KDE环境或D-Bus不可用？）"
-    exit 1
-fi
-
-# ── 发送测试通知 ─────────────────────────────────────────────────────────────
-echo ""
-info "发送测试通知..."
-NOTIFY_ID=$(notify-send \
-    --print-id \
-    --app-name "kde-notify-test" \
-    --expire-time 30000 \
-    --urgency normal \
-    "🔔 测试通知" \
-    "请在30秒内 点击 或 关闭 此通知" \
-    2>/dev/null || echo "0")
-
-if [[ "$NOTIFY_ID" -gt 0 ]]; then
-    success "通知已发送，notify-send 返回 ID=$NOTIFY_ID"
-else
-    warn "notify-send 未返回 ID（部分版本不支持 --print-id）"
-fi
-
-# ── 等待状态文件出现 ──────────────────────────────────────────────────────────
-echo ""
-info "等待你 点击 或 关闭 通知（最多30秒）..."
-echo ""
-
-TIMEOUT=30
-ELAPSED=0
-EVENT_FILE=""
-while [[ $ELAPSED -lt $TIMEOUT ]]; do
-    if [[ -f "$CLICKED_FILE" ]]; then EVENT_FILE="$CLICKED_FILE"; break; fi
-    if [[ -f "$CLOSED_FILE"  ]]; then EVENT_FILE="$CLOSED_FILE";  break; fi
+# ── 启动监听进程 ─────────────────────────────────────────────────────────────
+start_monitor() {
+    kill "$MONITOR_PID" 2>/dev/null || true
+    wait "$MONITOR_PID" 2>/dev/null || true
+    MONITOR_PID=""
+    "$BINARY" --status-dir "$STATUS_DIR" --log-level debug --once &
+    MONITOR_PID=$!
+    sleep 0.8   # 等 D-Bus 订阅就绪
     if ! kill -0 "$MONITOR_PID" 2>/dev/null; then
-        # --once 模式下进程正常退出
-        if [[ -f "$CLICKED_FILE" ]]; then EVENT_FILE="$CLICKED_FILE"; break; fi
-        if [[ -f "$CLOSED_FILE"  ]]; then EVENT_FILE="$CLOSED_FILE";  break; fi
+        error "监听进程已退出（非KDE环境或D-Bus不可用？）"
+        exit 1
     fi
-    sleep 1
-    (( ELAPSED++ )) || true
-    printf "\r  已等待 %2ds / %ds..." "$ELAPSED" "$TIMEOUT"
-done
-echo ""
+    info "监听进程 PID=$MONITOR_PID"
+}
 
-# ── 结果展示 ─────────────────────────────────────────────────────────────────
-echo ""
-info "═══════════════════════════════════════════════"
-info " 测试结果"
-info "═══════════════════════════════════════════════"
+# ── 等待状态文件 ──────────────────────────────────────────────────────────────
+wait_for_file() {
+    local file="$1" timeout="${2:-30}" elapsed=0
+    while [[ $elapsed -lt $timeout ]]; do
+        [[ -f "$file" ]] && return 0
+        ! kill -0 "$MONITOR_PID" 2>/dev/null && [[ -f "$file" ]] && return 0
+        sleep 1
+        (( elapsed++ )) || true
+        printf "\r  已等待 %2ds / %ds ..." "$elapsed" "$timeout"
+    done
+    echo ""
+    return 1
+}
 
+# ── 格式化输出 JSON ───────────────────────────────────────────────────────────
 show_file() {
     local label="$1" file="$2"
     if [[ -f "$file" ]]; then
-        success "$label → $file"
+        success "$label"
         if command -v python3 &>/dev/null; then
-            python3 -m json.tool "$file" | sed 's/^/    /'
+            python3 -m json.tool "$file" 2>/dev/null | sed 's/^/    /' || cat "$file" | sed 's/^/    /'
         else
-            cat "$file" | sed 's/^/    /'
+            sed 's/^/    /' "$file"
         fi
     fi
 }
 
-show_file "created（通知创建）" "$CREATED_FILE"
-show_file "clicked （点击）"    "$CLICKED_FILE"
-show_file "closed  （关闭）"    "$CLOSED_FILE"
+PASS=0; FAIL=0
 
-if [[ -z "$EVENT_FILE" ]]; then
-    warn "超时，未捕获到事件（通知可能未显示或未操作）"
-    exit 1
-else
+# ════════════════════════════════════════════════════════════════════════════
+# 测试 1：关闭事件（NotificationClosed）
+# ════════════════════════════════════════════════════════════════════════════
+run_close_test() {
     echo ""
-    success "测试通过 ✓"
+    info "────────────────────────────────────────────────"
+    info "测试 1/2：关闭事件（NotificationClosed）"
+    info "────────────────────────────────────────────────"
+    rm -f "$CREATED_FILE" "$CLOSED_FILE"
+
+    start_monitor
+
+    info "发送通知（请直接点击 ✕ 或划走关闭）..."
+    notify-send \
+        --app-name "kde-notify-test" \
+        --expire-time 30000 \
+        "🔔 关闭测试" \
+        "请 直接关闭 此通知（点X / 划走），不要点按钮" \
+        2>/dev/null &
+
+    echo ""
+    info "等待关闭操作（最多30秒）..."
+    if wait_for_file "$CLOSED_FILE" 30; then
+        echo ""
+        show_file "created.json:" "$CREATED_FILE"
+        show_file "closed.json: " "$CLOSED_FILE"
+        success "关闭事件测试 PASS ✓"
+        (( PASS++ )) || true
+    else
+        warn "超时，未捕获到关闭事件"
+        (( FAIL++ )) || true
+    fi
+}
+
+# ════════════════════════════════════════════════════════════════════════════
+# 测试 2：点击事件（ActionInvoked）
+# ════════════════════════════════════════════════════════════════════════════
+run_click_test() {
+    echo ""
+    info "────────────────────────────────────────────────"
+    info "测试 2/2：点击事件（ActionInvoked）"
+    info "────────────────────────────────────────────────"
+    rm -f "$CREATED_FILE" "$CLICKED_FILE"
+
+    start_monitor
+
+    if [[ "$NOTIFY_HAS_ACTION" == "true" ]]; then
+        info "发送带 action 按钮的通知（请点击通知底部的 [✅ 确认] 按钮）..."
+        notify-send \
+            --app-name "kde-notify-test" \
+            --expire-time 30000 \
+            --action "default:✅ 确认" \
+            "🔔 点击测试" \
+            "请点击底部 [✅ 确认] 按钮触发 ActionInvoked 事件" \
+            2>/dev/null &
+    else
+        warn "当前 notify-send 不支持 --action（libnotify < 0.8）"
+        warn "将发送普通通知，请直接点击通知体（KDE 中点击体也可能触发 ActionInvoked）"
+        notify-send \
+            --app-name "kde-notify-test" \
+            --expire-time 30000 \
+            "🔔 点击测试" \
+            "请 点击 此通知（不要关闭）" \
+            2>/dev/null &
+    fi
+
+    echo ""
+    info "等待点击操作（最多30秒）..."
+    if wait_for_file "$CLICKED_FILE" 30; then
+        echo ""
+        show_file "created.json: " "$CREATED_FILE"
+        show_file "clicked.json: " "$CLICKED_FILE"
+        success "点击事件测试 PASS ✓"
+        (( PASS++ )) || true
+    else
+        echo ""
+        warn "超时，未捕获到点击事件（ActionInvoked）"
+        warn "提示: ActionInvoked 只在点击通知的 action 按钮时触发，"
+        warn "      直接关闭通知触发 NotificationClosed(reason=1)，不触发 ActionInvoked"
+        (( FAIL++ )) || true
+    fi
+}
+
+# ── 执行测试 ──────────────────────────────────────────────────────────────────
+case "$MODE" in
+    close) run_close_test ;;
+    click) run_click_test ;;
+    *)     run_close_test; run_click_test ;;
+esac
+
+# ── 汇总 ─────────────────────────────────────────────────────────────────────
+echo ""
+info "═══════════════════════════════════════════════"
+if [[ $FAIL -eq 0 ]]; then
+    success "全部通过 PASS=$PASS FAIL=$FAIL ✓"
+else
+    warn "结果: PASS=$PASS FAIL=$FAIL"
+    exit 1
 fi
+

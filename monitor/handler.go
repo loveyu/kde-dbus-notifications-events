@@ -12,11 +12,6 @@ import (
 // actionEvent is the JSON format for clicked and created notification files.
 type actionEvent struct {
 	NotifyID  uint32  `json:"notifyId"`
-	UniqueID  string  `json:"uniqueId"`
-	AppName   string  `json:"appName"`
-	Title     string  `json:"title"`
-	Message   string  `json:"message"`
-	Device    string  `json:"device"`
 	Timestamp float64 `json:"timestamp"`
 	Action    string  `json:"action"`
 }
@@ -24,11 +19,6 @@ type actionEvent struct {
 // closedEvent is the JSON format for the notification closed file.
 type closedEvent struct {
 	NotifyID  uint32  `json:"notifyId"`
-	UniqueID  string  `json:"uniqueId"`
-	AppName   string  `json:"appName"`
-	Title     string  `json:"title"`
-	Message   string  `json:"message"`
-	Device    string  `json:"device"`
 	Timestamp float64 `json:"timestamp"`
 	Reason    uint32  `json:"reason"`
 }
