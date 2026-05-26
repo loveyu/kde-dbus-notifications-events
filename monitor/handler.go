@@ -133,6 +133,25 @@ func handleNotifyCreated(notifyID uint32, ts float64, ci callInfo, cfg *config.C
 	logger.Info(fmt.Sprintf("通知创建: notifyId=%d, app=%q, summary=%q, actions=%d个",
 		notifyID, ci.appName, ci.summary, len(ev.Actions)))
 	writeJSON(ev, path, notifyID, logger)
+	appendNotifyID(notifyID, cfg, logger)
+}
+
+// appendNotifyID appends the notification ID as "${id}\n" to the ids file.
+// The file is opened, written, and closed each time so external deletion is handled gracefully.
+func appendNotifyID(notifyID uint32, cfg *config.Config, logger *config.Logger) {
+	idsPath := filepath.Join(cfg.StatusDir, "kde-dbus-notify-ids.txt")
+	f, err := os.OpenFile(idsPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		logger.Error(fmt.Sprintf("打开IDs文件失败: %v", err))
+		return
+	}
+	_, writeErr := fmt.Fprintf(f, "%d\n", notifyID)
+	_ = f.Close()
+	if writeErr != nil {
+		logger.Error(fmt.Sprintf("写入IDs文件失败: %v", writeErr))
+	} else {
+		logger.Debug(fmt.Sprintf("追加通知ID到文件: %s (notifyId=%d)", idsPath, notifyID))
+	}
 }
 
 // writeJSON atomically writes v as JSON to path (tmp file + rename).
